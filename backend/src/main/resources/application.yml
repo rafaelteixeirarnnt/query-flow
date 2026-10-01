@@ -1,0 +1,40 @@
+server:
+  port: 8080
+  error:
+    include-message: never
+    include-stacktrace: never
+spring:
+  application:
+    name: queryhub
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:queryhub}
+    username: ${DB_USERNAME:queryhub}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+app:
+  encryption-key: ${APP_ENCRYPTION_KEY}
+query:
+  timeout-seconds: ${QUERY_TIMEOUT_SECONDS:60}
+  max-result-rows: ${CONSULTA_LIMITE_REGISTROS:1000}
+  max-concurrent-databases: ${MAX_CONCURRENT_DATABASES:5}
+  max-active-executions: ${MAX_ACTIVE_EXECUTIONS:2}
+  max-databases-per-query: ${MAX_DATABASES_PER_QUERY:50}
+  admission-timeout-seconds: ${ADMISSION_TIMEOUT_SECONDS:5}
+  connect-timeout-seconds: ${CONNECT_TIMEOUT_SECONDS:10}
+  max-cell-bytes: ${MAX_CELL_BYTES:1048576}
+  max-execution-bytes: ${MAX_EXECUTION_BYTES:33554432}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

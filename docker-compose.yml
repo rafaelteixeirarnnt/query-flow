@@ -1,0 +1,59 @@
+name: queryhub
+services:
+  queryhub-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-queryhub}
+      POSTGRES_USER: ${DB_USERNAME:-queryhub}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD no arquivo .env}
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["queryhub-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  queryhub-backend:
+    build: ./backend
+    environment:
+      DB_HOST: queryhub-postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-queryhub}
+      DB_USERNAME: ${DB_USERNAME:-queryhub}
+      DB_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Defina APP_ENCRYPTION_KEY}
+      QUERY_TIMEOUT_SECONDS: ${QUERY_TIMEOUT_SECONDS:-60}
+      CONSULTA_LIMITE_REGISTROS: ${CONSULTA_LIMITE_REGISTROS:-1000}
+      MAX_CONCURRENT_DATABASES: ${MAX_CONCURRENT_DATABASES:-5}
+      MAX_ACTIVE_EXECUTIONS: ${MAX_ACTIVE_EXECUTIONS:-2}
+      MAX_DATABASES_PER_QUERY: ${MAX_DATABASES_PER_QUERY:-50}
+      ADMISSION_TIMEOUT_SECONDS: ${ADMISSION_TIMEOUT_SECONDS:-5}
+      CONNECT_TIMEOUT_SECONDS: ${CONNECT_TIMEOUT_SECONDS:-10}
+      MAX_CELL_BYTES: ${MAX_CELL_BYTES:-1048576}
+      MAX_EXECUTION_BYTES: ${MAX_EXECUTION_BYTES:-33554432}
+    ports: ["127.0.0.1:8001:8080"]
+    mem_limit: 768m
+    depends_on:
+      queryhub-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+  queryhub-frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:3000:80"]
+    depends_on:
+      queryhub-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+volumes:
+  queryhub-data:

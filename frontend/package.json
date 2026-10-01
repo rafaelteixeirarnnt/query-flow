@@ -1,0 +1,33 @@
+{
+  "name": "queryhub-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 3000",
+    "build": "tsc -b && vite build",
+    "test": "vitest",
+    "preview": "vite preview --host 127.0.0.1 --port 3000"
+  },
+  "dependencies": {
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "@monaco-editor/react": "4.7.0",
+    "monaco-editor": "0.52.2",
+    "@radix-ui/react-dialog": "1.1.15",
+    "@tanstack/react-table": "8.21.3",
+    "lucide-react": "0.468.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.2",
+    "vite": "6.3.6",
+    "vitest": "3.2.4",
+    "jsdom": "26.1.0",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/jest-dom": "6.8.0",
+    "@playwright/test": "1.55.1"
+  }
+}
