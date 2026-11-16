@@ -41,7 +41,7 @@ export const api = {
       "/query/validate",
       json("POST", { sql }),
     ),
-  queryConfig: (signal?: AbortSignal) => request<{ maxResultRows: number }>("/query/config", { signal }),
+  queryConfig: (signal?: AbortSignal) => request<{ defaultResultRows: number }>("/query/config", { signal }),
   execute: (connectionId: number, databases: string[], sql: string, rowLimit?: number) =>
     request<Execution>(
       "/query/execute",

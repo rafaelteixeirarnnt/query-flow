@@ -348,7 +348,7 @@ class QueryHubAcceptanceIT {
   void perExecutionLimitAppliesToEveryDatabaseAndRejectsInvalidValues() {
     long id = create();
     var config = http.getForObject("/api/query/config", JsonNode.class);
-    assertThat(config.get("maxResultRows").asInt()).isEqualTo(2);
+    assertThat(config.get("defaultResultRows").asInt()).isEqualTo(2);
     var request =
         Map.of(
             "connectionId",
@@ -368,7 +368,27 @@ class QueryHubAcceptanceIT {
               assertThat(r.rowCount()).isEqualTo(1);
               assertThat(r.truncated()).isTrue();
             });
-    for (Object invalid : List.of(0, -1, 3, 1.5, "invalid")) {
+    var aboveDefault =
+        http.postForObject(
+            "/api/query/execute",
+            Map.of(
+                "connectionId",
+                id,
+                "databases",
+                List.of("hcac", "campo_limpo"),
+                "sql",
+                "SELECT * FROM public.exemplo",
+                "rowLimit",
+                5000),
+            ExecutionResponse.class);
+    assertThat(aboveDefault.results())
+        .allSatisfy(
+            r -> {
+              assertThat(r.rowLimit()).isEqualTo(5000);
+              assertThat(r.rowCount()).isEqualTo(3);
+              assertThat(r.truncated()).isFalse();
+            });
+    for (Object invalid : List.of(0, -1, Integer.MAX_VALUE, 1.5, "invalid")) {
       assertThat(
               http.postForEntity(
                       "/api/query/execute",
@@ -387,4 +407,134 @@ class QueryHubAcceptanceIT {
           .isEqualTo(400);
     }
   }
+
+  @AfterEach
+  void externalSessionsAreClosedAfterEveryScenario() throws Exception {
+    assertNoExternalSessions();
+  }
+
+  private void assertNoExternalSessions() throws Exception {
+    try (var monitor =
+            DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        var statement = monitor.createStatement()) {
+      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+      List<String> sessions;
+      do {
+        sessions = new ArrayList<>();
+        try (var rs =
+            statement.executeQuery(
+                "SELECT datname, state FROM pg_stat_activity WHERE application_name='QueryHub'")) {
+          while (rs.next()) sessions.add(rs.getString(1) + ": " + rs.getString(2));
+        }
+        if (sessions.isEmpty()) return;
+        Thread.sleep(25);
+      } while (System.nanoTime() < deadline);
+      assertThat(sessions).as("External JDBC sessions must close after each operation").isEmpty();
+    }
+  }
+
+  @Test
+  void repeatedQueryDiscoveryAndConnectionTestsDoNotAccumulateSessions() throws Exception {
+    long id = create();
+    for (int attempt = 0; attempt < 10; attempt++) {
+      assertThat(
+              http.postForObject("/api/connections/" + id + "/test", null, JsonNode.class)
+                  .get("success")
+                  .asBoolean())
+          .isTrue();
+      assertNoExternalSessions();
+      http.getForObject("/api/connections/" + id + "/databases", JsonNode.class);
+      assertNoExternalSessions();
+      var result =
+          http.postForObject(
+              "/api/query/execute",
+              new ExecuteQueryRequest(
+                  id, List.of("hcac", "campo_limpo", "zaio"), "SELECT * FROM public.exemplo"),
+              ExecutionResponse.class);
+      assertThat(result.summary().successCount()).isEqualTo(2);
+      assertThat(result.summary().errorCount()).isEqualTo(1);
+      assertNoExternalSessions();
+    }
+  }
+
+  @Autowired br.com.queryhub.service.EncryptionService encryption;
+  @Autowired br.com.queryhub.service.DatabaseConnectionService savedConnections;
+
+  @Test
+  void serverClosesAbandonedTransactionEvenWhileClientRemainsOpen() throws Exception {
+    long id = create();
+    var props =
+        new br.com.queryhub.config.QueryProperties(1, 1000, 1, 2, 50, 1, 1, 1048576, 33554432);
+    var factory = new br.com.queryhub.service.ExternalConnectionFactory(encryption, props);
+    try (var client = factory.open(savedConnections.snapshot(id), "hcac")) {
+      client.setAutoCommit(false);
+      try (var st = client.createStatement();
+          var rs =
+              st.executeQuery("SELECT current_setting('idle_in_transaction_session_timeout')")) {
+        rs.next();
+        assertThat(rs.getString(1)).isEqualTo("2s");
+      }
+      // No client close/rollback: the server must reap this abandoned transaction itself.
+      assertNoExternalSessions();
+      assertThatThrownBy(
+              () -> {
+                try (var st = client.createStatement()) {
+                  st.execute("SELECT 1");
+                }
+              })
+          .isInstanceOf(SQLException.class);
+    }
+  }
+
+  @Autowired br.com.queryhub.service.ExternalConnectionLimiter externalLimiter;
+
+  @Test
+  void exhaustedConnectionCapacityRecoversAfterPermitsAreReleased() throws Exception {
+    long id = create();
+    // Occupy the two configured slots deterministically; no timing-dependent slow query.
+    try (var first = externalLimiter.acquire(); var second = externalLimiter.acquire()) {
+      var blocked = http.getForEntity("/api/connections/" + id + "/databases", JsonNode.class);
+      assertThat(blocked.getStatusCode().value()).isEqualTo(429);
+      assertThat(blocked.getBody().get("code").asText()).isEqualTo("CONNECTION_CAPACITY");
+      assertNoExternalSessions();
+    }
+    var recovered = http.postForObject("/api/query/execute",
+        new ExecuteQueryRequest(id, List.of("hcac", "campo_limpo"), "SELECT 1"),
+        ExecutionResponse.class);
+    assertThat(recovered.summary().successCount()).isEqualTo(2);
+    assertNoExternalSessions();
+  }
+
+  @Test
+  void exportsUseSnapshotEvenAfterSourceTableIsRemoved() throws Exception {
+    long id = create();
+    try (var admin = DriverManager.getConnection(url("hcac"), postgres.getUsername(), postgres.getPassword());
+        var st = admin.createStatement()) {
+      st.execute("CREATE TABLE public.export_fixture AS SELECT 123 AS id");
+      st.execute("GRANT SELECT ON public.export_fixture TO reader");
+      var execution = http.postForObject("/api/query/execute",
+          new ExecuteQueryRequest(id, List.of("hcac"), "SELECT * FROM public.export_fixture"),
+          ExecutionResponse.class);
+      assertThat(execution.summary().successCount()).isEqualTo(1);
+      st.execute("DROP TABLE public.export_fixture");
+      for (String format : List.of("csv", "xlsx")) {
+        var exported = http.postForEntity("/api/query/export/" + format,
+            new ExportRequest(execution), byte[].class);
+        assertThat(exported.getStatusCode().value()).isEqualTo(200);
+        assertThat(exported.getBody()).isNotEmpty();
+        if (format.equals("csv")) {
+          assertThat(new String(exported.getBody(), java.nio.charset.StandardCharsets.UTF_8))
+              .contains("DATABASE", "hcac", "123");
+        } else {
+          try (var workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook(
+              new java.io.ByteArrayInputStream(exported.getBody()))) {
+            assertThat(workbook.getSheet("Consolidado").getRow(1).getCell(1).getStringCellValue())
+                .isEqualTo("123");
+          }
+        }
+      }
+    }
+  }
+
 }

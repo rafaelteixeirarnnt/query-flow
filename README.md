@@ -1,8 +1,25 @@
 # QueryHub
 
-> **Status: versão em desenvolvimento (working / work in progress).** Esta publicação disponibiliza o estado atual do projeto para avaliação e evolução. Ainda há ajustes a serem realizados, e o comportamento e a interface podem mudar nas próximas versões. Não é uma versão final ou estável.
+**Uma consulta SQL. Múltiplos databases PostgreSQL. Resultados em um só lugar.**
 
-Gerenciador de conexões e consultas PostgreSQL em múltiplos databases. Cadastre o servidor uma vez, descubra os databases, execute um SELECT/WITH de leitura e veja os resultados consolidados ou separados por database. Uma falha individual não descarta as consultas bem-sucedidas.
+Consultar a mesma informação em vários databases exige repetir consultas e juntar resultados manualmente. O QueryHub centraliza esse fluxo: cadastre um servidor, descubra e selecione os databases e execute uma consulta de leitura para visualizar os resultados consolidados ou por database.
+
+![Editor SQL com três databases selecionados e resultado consolidado com a coluna DATABASE](docs/images/01-consulta-consolidada.png)
+
+*Consulta em três databases locais com dados sintéticos; a coluna DATABASE identifica a origem de cada linha.*
+
+## Principais diferenciais
+
+- **Consulta em múltiplos databases:** execute o mesmo SELECT/WITH nos databases selecionados, com concorrência e timeouts configuráveis.
+- **Resultados com origem identificada:** o consolidado inclui o database de cada linha e informa diferenças de tipos nos metadados das colunas retornados pela API.
+- **Falhas parciais isoladas:** um database com erro não descarta os resultados bem-sucedidos dos demais.
+- **Editor e exploração de dados:** Monaco para escrever SQL; tabelas com busca, filtros, ordenação e paginação.
+- **Exportação sem reexecução:** baixe CSV ou Excel a partir dos resultados exibidos.
+- **Controles de execução:** validação SQL por AST, transações read-only, credenciais criptografadas e auditoria por database.
+
+**Stack:** Java 21 · Spring Boot 3.5.x · PostgreSQL · JDBC · React · TypeScript · Vite · Docker Compose.
+
+**Em desenvolvimento.** MVP destinado ao uso local ou em rede controlada, sem autenticação/RBAC. Consulte a seção [Criptografia e segurança](#criptografia-e-segurança) antes de executar. A interface e o comportamento podem mudar nas próximas versões.
 
 ## Início rápido com Docker
 
@@ -20,9 +37,23 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Abra [QueryHub](http://localhost:3000). Backend: `http://localhost:8001`; health: `http://localhost:8001/actuator/health`. Todas as portas são vinculadas a `127.0.0.1`; nenhuma porta 8080 é publicada no host. O banco interno usa volume persistente. `docker compose down` preserva o volume; **não use `down -v` se deseja manter os dados**.
+Abra [QueryHub](http://localhost:3000). Backend: `http://localhost:8001`; health: `http://localhost:8001/actuator/health`. Por padrão, todas as portas são vinculadas a `127.0.0.1`; nenhuma porta 8080 é publicada no host. O banco interno usa volume persistente. `docker compose down` preserva o volume; **não use `down -v` se deseja manter os dados**.
 
 O `.env` é ignorado e nunca deve ser versionado. Caso o ambiente já contenha um `.env` gerado durante a instalação, preserve sua chave: trocá-la sem recriptografar as senhas torna as conexões existentes inutilizáveis.
+
+### Acesso pela mesma rede/Wi-Fi
+
+Para uma rede local controlada, defina `QUERYHUB_BIND_ADDRESS=0.0.0.0` no `.env` e aplique somente ao frontend:
+
+```sh
+docker compose up -d --no-deps --no-build queryhub-frontend
+```
+
+Acesse `http://<IP-local-da-máquina>:3000` em outro dispositivo da rede. `localhost:3000` continua funcionando na máquina que executa o Docker. O frontend encaminha `/api` internamente; backend e PostgreSQL permanecem vinculados a `127.0.0.1`.
+
+`0.0.0.0` aceita conexões nas interfaces IPv4 da máquina. O MVP não tem login: quem alcançar essa porta poderá administrar conexões e consultar dados. Use somente em rede confiável, sem encaminhar a porta no roteador para a Internet. A máquina e o Docker precisam permanecer ligados; firewall e isolamento de clientes do Wi-Fi podem impedir o acesso. Se o IP mudar, atualize o endereço compartilhado.
+
+Para voltar ao acesso apenas local, defina `QUERYHUB_BIND_ADDRESS=127.0.0.1` e execute o mesmo comando.
 
 ## Fluxo de uso
 
@@ -41,6 +72,14 @@ WHERE situacao = 'A';
 ```
 
 Qualifique as tabelas pelo schema (`public.exemplo`, `agh.exemplo`): o `search_path` externo é restrito a `pg_catalog` para impedir resolução de funções em schemas de usuário. O database deve estar na lista descoberta pelo backend; nomes enviados pelo cliente são revalidados antes de abrir os workers.
+
+![Conexão local cadastrada, três databases descobertos, busca preenchida e dois databases selecionados](docs/images/03-selecao-databases.png)
+
+*Descoberta, busca e seleção de databases na conexão Demonstração local.*
+
+![Dois databases com sucesso e um com erro, mantendo seis registros no consolidado e o resumo por database visível](docs/images/02-falha-parcial.png)
+
+*Falha controlada em demo_centro: os resultados de demo_norte e demo_sul continuam disponíveis. Todas as telas usam dados sintéticos e conexões locais.*
 
 ## Arquitetura
 
@@ -78,7 +117,7 @@ frontend/src/
 | DB_PASSWORD | obrigatório | Senha do banco interno |
 | APP_ENCRYPTION_KEY | obrigatório | 32 bytes em Base64 |
 | QUERY_TIMEOUT_SECONDS | 60 | Timeout por consulta; máximo 300 |
-| CONSULTA_LIMITE_REGISTROS | 1000 | Quantidade máxima de registros retornados por database em uma execução de consulta. |
+| CONSULTA_LIMITE_REGISTROS | 1000 | Quantidade padrão de registros retornados por database em uma execução de consulta. |
 | MAX_CONCURRENT_DATABASES | 5 | Conexões externas globais por instância |
 | MAX_ACTIVE_EXECUTIONS | 2 | Requisições de execução admitidas simultaneamente |
 | MAX_DATABASES_PER_QUERY | 50 | Quantidade por requisição |
@@ -91,7 +130,7 @@ Também há limite de 100.000 caracteres SQL, 256 colunas, 1 MiB no body de requ
 
 O limite é lido por `query.max-result-rows` de `CONSULTA_LIMITE_REGISTROS` (padrão 1000). Para usar 5000, defina `CONSULTA_LIMITE_REGISTROS=5000` no ambiente ou `.env` e recrie o serviço (`docker compose up -d queryhub-backend`); não é necessário recompilar. Valores zero, negativos, fracionários ou não numéricos impedem a inicialização pelo binding/Bean Validation. O máximo técnico é 2147483646 para reservar uma linha adicional sem overflow do inteiro JDBC.
 
-O JDBC aplica `Statement.setMaxRows(limite + 1)` por database, mantendo o cursor/fetch em lotes. A resposta contém `rowLimit` em cada resultado; o frontend usa esse valor no aviso. A exportação usa a mesma configuração para validar a quantidade de linhas. Não há teto de registros compartilhado entre databases; os limites de memória existentes continuam independentes.
+O JDBC aplica `Statement.setMaxRows(limite + 1)` por database, mantendo o cursor/fetch em lotes. A resposta contém `rowLimit` em cada resultado; o frontend usa esse valor no aviso. A exportação valida a quantidade de linhas pelo limite escolhido na execução. Não há teto de registros compartilhado entre databases; os limites de memória existentes continuam independentes.
 
 Uma linha adicional detecta se houve truncamento: exatamente o limite de linhas não produz falso aviso. Excesso de bytes agregados marca `truncated` com `BYTE_LIMIT`; célula excessiva gera erro individual. Campos podem ser materializados pelo driver antes da checagem, portanto a limitação de memória do processo e consultas cuidadosas continuam necessárias.
 
@@ -185,8 +224,16 @@ Após estabilizar o fluxo principal: queries salvas, favoritos, parâmetros, his
 
 ### Quantidade de registros por execução
 
-No editor, o campo **Registros por database** permite informar de 1 até o máximo configurado no servidor. O valor inicial vem de `GET /api/query/config` (`maxResultRows`), sem constante no frontend. A quantidade de linhas por página da tabela apenas organiza a visualização.
+No editor, **Registros por database** inicia com `CONSULTA_LIMITE_REGISTROS` (padrão 1000), informado por `GET /api/query/config` no campo `defaultResultRows`. Esse valor é um padrão, não um teto: o usuário pode solicitar, por exemplo, 5000 ou 10000 registros.
 
-`POST /api/query/execute` aceita o campo opcional `rowLimit` (inteiro positivo até `CONSULTA_LIMITE_REGISTROS`). Quando omitido, usa o máximo configurado, preservando clientes existentes. Valores inválidos ou acima do máximo retornam HTTP 400. O valor é isolado por execução e aplicado igualmente a cada database, tanto no JDBC quanto na leitura e na informação `rowLimit` da resposta.
+`POST /api/query/execute` aceita `rowLimit` opcional. Quando omitido, usa o padrão configurado. A quantidade deve ser inteira e positiva; o teto técnico é 2147483646 para a linha extra de detecção no JDBC. A exportação respeita o limite da execução. Os controles existentes de timeout e memória permanecem ativos e podem limitar resultados muito grandes.
 
-Resultados com muitas colunas usam rolagem interna; a altura da tabela acompanha a janela até 420 px, com cabeçalho fixo e paginação fora da área rolável.
+A tabela renderiza inicialmente no máximo 100 registros e permite navegar pelos demais com paginação (25, 50 ou 100 por página). A consulta ainda retorna o resultado solicitado em uma resposta: a paginação é de visualização, não uma busca incremental no servidor. Resultados largos usam rolagem interna, altura responsiva de até 420 px e cabeçalho fixo.
+
+### Encerramento das conexões externas
+
+Consultas, descoberta e teste de conexão usam JDBC direto (`PGSimpleDataSource`), sem pool externo, com fechamento por `try-with-resources`. ResultSet, Statement e Connection são fechados antes de liberar a vaga de concorrência. O rollback preserva a exceção original se a limpeza também falhar.
+
+Cada sessão externa recebe `idle_in_transaction_session_timeout` igual a `QUERY_TIMEOUT_SECONDS + CONNECT_TIMEOUT_SECONDS` (70 segundos nos valores padrão). É uma proteção local à sessão, sem alterar a configuração global do PostgreSQL: encerra uma transação abandonada quando uma falha de rede impede o fechamento normal. Não afeta retroativamente sessões antigas.
+
+O pool Hikari de até cinco conexões `idle` pertence somente ao banco interno de configurações/auditoria. `CONNECTION_CAPACITY` significa que as vagas locais estão ocupadas; `SERVER_CONNECTION_CAPACITY` indica limite do PostgreSQL. Falhas externas registram identificador da execução, SQLSTATE, tipo da causa e duração sem SQL, senha ou dados retornados. `CONNECTION_LOST` e `CONNECTION_TERMINATED` distinguem perda da conexão e encerramento pelo servidor.

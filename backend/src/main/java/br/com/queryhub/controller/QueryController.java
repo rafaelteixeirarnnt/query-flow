@@ -21,7 +21,7 @@ public class QueryController {
 
   @GetMapping("/config")
   public java.util.Map<String, Integer> config() {
-    return java.util.Map.of("maxResultRows", props.maxResultRows());
+    return java.util.Map.of("defaultResultRows", props.maxResultRows());
   }
 
   @PostMapping("/validate")

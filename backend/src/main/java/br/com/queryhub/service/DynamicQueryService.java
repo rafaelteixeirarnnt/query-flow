@@ -39,11 +39,11 @@ public class DynamicQueryService {
 
   public ExecutionResponse execute(ExecuteQueryRequest request) {
     int rowLimit = request.rowLimit() == null ? props.maxResultRows() : request.rowLimit();
-    if (rowLimit < 1 || rowLimit > props.maxResultRows())
+    if (rowLimit < 1 || rowLimit > Integer.MAX_VALUE - 1)
       throw new ApiException(
           400,
           "ROW_LIMIT_INVALID",
-          "Informe de 1 a " + props.maxResultRows() + " registros por database.");
+          "Informe uma quantidade inteira positiva de registros (até 2147483646).");
     if (!active.tryAcquire())
       throw new ApiException(
           429, "EXECUTION_CAPACITY", "Há execuções em andamento. Tente novamente.");

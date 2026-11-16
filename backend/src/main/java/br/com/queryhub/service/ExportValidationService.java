@@ -1,6 +1,5 @@
 package br.com.queryhub.service;
 
-import br.com.queryhub.config.QueryProperties;
 import br.com.queryhub.dto.*;
 import br.com.queryhub.exception.ApiException;
 import java.util.*;
@@ -8,12 +7,6 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class ExportValidationService {
-  private final QueryProperties props;
-
-  public ExportValidationService(QueryProperties props) {
-    this.props = props;
-  }
-
   public void validate(ExportRequest request) {
     try {
       var e = request.execution();
@@ -32,7 +25,9 @@ public class ExportValidationService {
             || r.columns() == null
             || r.columns().size() > 256
             || r.rows() == null
-            || r.rows().size() > props.maxResultRows()
+            || r.rowLimit() < 1
+            || r.rowLimit() > Integer.MAX_VALUE - 1
+            || r.rows().size() > r.rowLimit()
             || !Set.of("SUCCESS", "ERROR").contains(r.status())
             || r.rowCount() != r.rows().size()) throw new IllegalArgumentException();
         if (!r.rows().isEmpty() && r.columns().isEmpty()) throw new IllegalArgumentException();

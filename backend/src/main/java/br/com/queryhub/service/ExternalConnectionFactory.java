@@ -27,6 +27,10 @@ public class ExternalConnectionFactory {
     ds.setConnectTimeout(props.connectTimeoutSeconds());
     ds.setSocketTimeout(props.timeoutSeconds() + props.connectTimeoutSeconds());
     ds.setApplicationName("QueryHub");
+    // Server-side backstop if a broken network prevents close/rollback reaching PostgreSQL.
+    ds.setOptions(
+        "-c idle_in_transaction_session_timeout="
+            + ((props.timeoutSeconds() + props.connectTimeoutSeconds()) * 1000L));
     ds.setReadOnlyMode("transaction");
     return ds.getConnection();
   }

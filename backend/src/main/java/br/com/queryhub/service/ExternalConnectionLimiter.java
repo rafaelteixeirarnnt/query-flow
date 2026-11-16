@@ -20,7 +20,9 @@ public class ExternalConnectionLimiter {
     try {
       if (!permits.tryAcquire(waitSeconds, TimeUnit.SECONDS))
         throw new ApiException(
-            429, "CONNECTION_CAPACITY", "Limite de conexões em uso. Tente novamente.");
+            429,
+            "CONNECTION_CAPACITY",
+            "Todas as conexões de consulta do QueryHub estão ocupadas. Aguarde as operações em andamento e tente novamente.");
       return new Permit();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

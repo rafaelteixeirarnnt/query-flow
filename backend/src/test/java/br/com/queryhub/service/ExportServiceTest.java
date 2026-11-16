@@ -40,12 +40,7 @@ class ExportServiceTest {
   @Test
   void csvEscapesAndNeutralizesFormulas() throws Exception {
     var out = new ByteArrayOutputStream();
-    new ExportService(
-            new ExportValidationService(
-                new br.com.queryhub.config.QueryProperties(
-                    60, 2000, 5, 2, 50, 5, 10, 1048576, 33554432)),
-            new ResultConsolidator())
-        .csv(fixture(), out);
+    new ExportService(new ExportValidationService(), new ResultConsolidator()).csv(fixture(), out);
     assertThat(out.toString(java.nio.charset.StandardCharsets.UTF_8))
         .contains("DATABASE", "'=1+1", "\"João, \"\"A\"\"\nB\"");
   }
@@ -53,12 +48,7 @@ class ExportServiceTest {
   @Test
   void xlsxHasSafeSheetNamesAndNoFormulas() throws Exception {
     var out = new ByteArrayOutputStream();
-    new ExportService(
-            new ExportValidationService(
-                new br.com.queryhub.config.QueryProperties(
-                    60, 2000, 5, 2, 50, 5, 10, 1048576, 33554432)),
-            new ResultConsolidator())
-        .xlsx(fixture(), out);
+    new ExportService(new ExportValidationService(), new ResultConsolidator()).xlsx(fixture(), out);
     try (var wb = new XSSFWorkbook(new ByteArrayInputStream(out.toByteArray()))) {
       assertThat(wb.getNumberOfSheets()).isEqualTo(3);
       assertThat(wb.getSheetAt(0).getSheetName()).isEqualTo("Resumo");
@@ -96,12 +86,7 @@ class ExportServiceTest {
                 List.of(bad),
                 e.consolidated(),
                 List.of()));
-    assertThatThrownBy(
-            () ->
-                new ExportValidationService(
-                        new br.com.queryhub.config.QueryProperties(
-                            60, 2000, 5, 2, 50, 5, 10, 1048576, 33554432))
-                    .validate(r))
+    assertThatThrownBy(() -> new ExportValidationService().validate(r))
         .isInstanceOf(br.com.queryhub.exception.ApiException.class);
   }
 
@@ -133,11 +118,7 @@ class ExportServiceTest {
             new ResultConsolidator().consolidate(List.of(result)),
             List.of());
     var out = new ByteArrayOutputStream();
-    new ExportService(
-            new ExportValidationService(
-                new br.com.queryhub.config.QueryProperties(
-                    60, 2000, 5, 2, 50, 5, 10, 1048576, 33554432)),
-            new ResultConsolidator())
+    new ExportService(new ExportValidationService(), new ResultConsolidator())
         .xlsx(new ExportRequest(execution), out);
     try (var wb = new XSSFWorkbook(new ByteArrayInputStream(out.toByteArray()))) {
       assertThat(wb.getSheetAt(2).getRow(1).getCell(0).getStringCellValue())
@@ -147,12 +128,9 @@ class ExportServiceTest {
 
   @org.junit.jupiter.params.ParameterizedTest
   @org.junit.jupiter.params.provider.ValueSource(ints = {500, 10001})
-  void exportUsesConfiguredRowLimit(int limit) {
+  void exportUsesExecutedRowLimit(int limit) {
     var original = fixture().execution();
-    var validator =
-        new ExportValidationService(
-            new br.com.queryhub.config.QueryProperties(
-                60, limit, 5, 2, 50, 5, 10, 1048576, 33554432));
+    var validator = new ExportValidationService();
     for (int count : new int[] {limit, limit + 1}) {
       var result =
           new DatabaseQueryResult(

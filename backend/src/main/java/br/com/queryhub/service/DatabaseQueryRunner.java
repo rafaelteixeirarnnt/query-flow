@@ -33,37 +33,49 @@ public class DatabaseQueryRunner {
         var c = factory.open(snapshot, database)) {
       c.setReadOnly(true);
       c.setAutoCommit(false);
-      try (var config = c.createStatement()) {
-        config.setQueryTimeout(props.timeoutSeconds());
-        config.execute("SET LOCAL search_path = pg_catalog");
-        config.execute(
-            "SET LOCAL statement_timeout = '" + (props.timeoutSeconds() * 1000L) + "ms'");
-        config.execute("SET LOCAL lock_timeout = '" + (props.timeoutSeconds() * 1000L) + "ms'");
-      }
-      try (var s = c.createStatement()) {
-        s.setQueryTimeout(props.timeoutSeconds());
-        s.setFetchSize(200);
-        s.setMaxRows(context.rowLimit + 1);
-        context.register(s);
-        try (var rs = s.executeQuery(sql)) {
-          var r = reader.read(rs, context.budget, context.rowLimit);
-          return new DatabaseQueryResult(
-              database,
-              "SUCCESS",
-              r.columns(),
-              r.rows(),
-              r.rows().size(),
-              elapsed(start),
-              r.truncated(),
-              r.truncationReason(),
-              null,
-              context.rowLimit);
-        } finally {
-          context.unregister(s);
-          c.rollback();
+      // A cleanup failure is suppressed onto the original error by try-with-resources.
+      // The outer scope always physically closes this non-pooled connection, then its permit.
+      try (var transaction = (AutoCloseable) c::rollback) {
+        try (var config = c.createStatement()) {
+          config.setQueryTimeout(props.timeoutSeconds());
+          config.execute("SET LOCAL search_path = pg_catalog");
+          config.execute(
+              "SET LOCAL statement_timeout = '" + (props.timeoutSeconds() * 1000L) + "ms'");
+          config.execute("SET LOCAL lock_timeout = '" + (props.timeoutSeconds() * 1000L) + "ms'");
+        }
+        try (var s = c.createStatement()) {
+          s.setQueryTimeout(props.timeoutSeconds());
+          s.setFetchSize(200);
+          s.setMaxRows(context.rowLimit + 1);
+          context.register(s);
+          try (var rs = s.executeQuery(sql)) {
+            var r = reader.read(rs, context.budget, context.rowLimit);
+            return new DatabaseQueryResult(
+                database,
+                "SUCCESS",
+                r.columns(),
+                r.rows(),
+                r.rows().size(),
+                elapsed(start),
+                r.truncated(),
+                r.truncationReason(),
+                null,
+                context.rowLimit);
+          } finally {
+            context.unregister(s);
+          }
         }
       }
     } catch (SQLException e) {
+      org.slf4j.LoggerFactory.getLogger(DatabaseQueryRunner.class)
+          .warn(
+              "External query failed: execution={} sqlState={} cause={} elapsedMs={}",
+              context.id,
+              e.getSQLState(),
+              e.getCause() == null
+                  ? e.getClass().getSimpleName()
+                  : e.getCause().getClass().getSimpleName(),
+              elapsed(start));
       return error(database, start, SqlErrorMapper.map(e), context);
     } catch (ApiException e) {
       return error(database, start, new QueryError(e.code, e.getMessage()), context);

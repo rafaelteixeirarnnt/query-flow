@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { test, expect } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { test, expect, afterEach } from "vitest";
 import { DynamicTable } from "./DynamicTable";
 test("keeps duplicate labels and distinguishes null from an empty string", () => {
   render(
@@ -93,4 +93,14 @@ test("filters numeric and boolean values as displayed even with a leading null",
     target: { value: "12" },
   });
   expect(screen.getByRole("button", { name: "12" })).toBeInTheDocument();
+});
+
+afterEach(cleanup);
+test("renders only 100 initial records and paginates the rest", () => {
+  render(<DynamicTable columns={[{key:'c1',label:'id',jdbcType:4,typeName:'int4',sourceTypes:['int4']}]} rows={Array.from({length:250},(_,i)=>({c1:i+1}))} />);
+  expect(screen.getAllByRole('row')).toHaveLength(101);
+  expect(screen.getByRole('combobox',{name:'Registros por página'})).toHaveValue('100');
+  expect(screen.queryByRole('button',{name:'101'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Próxima página'}));
+  expect(screen.getByRole('button',{name:'101'})).toBeInTheDocument();
 });

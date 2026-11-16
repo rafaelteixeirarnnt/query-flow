@@ -22,17 +22,17 @@ export function QueryWorkspace({
   const [sql, setSql] = useState(
     "SELECT\n    id,\n    nome,\n    situacao\nFROM agh.exemplo;",
   );
-  const [maxRows, setMaxRows] = useState<number | null>(null);
+  const [defaultRows, setDefaultRows] = useState<number | null>(null);
   const [rowLimit, setRowLimit] = useState("");
   const [configError, setConfigError] = useState("");
-  const validLimit = maxRows !== null && /^\d+$/.test(rowLimit) && Number(rowLimit) >= 1 && Number(rowLimit) <= maxRows;
+  const validLimit = defaultRows !== null && /^\d+$/.test(rowLimit) && Number(rowLimit) >= 1 && Number(rowLimit) <= 2147483646;
   useEffect(() => {
     const controller = new AbortController();
     api.queryConfig(controller.signal).then(config => {
       if (!controller.signal.aborted) {
-        if (!Number.isInteger(config.maxResultRows) || config.maxResultRows < 1) throw new Error("Limite do servidor indisponível. Recarregue a página.");
-        setMaxRows(config.maxResultRows);
-        setRowLimit(String(config.maxResultRows));
+        if (!Number.isInteger(config.defaultResultRows) || config.defaultResultRows < 1) throw new Error("Configuração do servidor indisponível. Recarregue a página.");
+        setDefaultRows(config.defaultResultRows);
+        setRowLimit(String(config.defaultResultRows));
       }
     }).catch(e => { if (!controller.signal.aborted) setConfigError(message(e)); });
     return () => controller.abort();
@@ -151,11 +151,11 @@ export function QueryWorkspace({
             <div className="editor-footer">
               <label className="query-row-limit">
                 <span>Registros por database</span>
-                <input aria-label="Registros por database" type="number" min={1} max={maxRows ?? undefined} step={1}
-                  value={rowLimit} disabled={executing || maxRows === null}
-                  aria-describedby="row-limit-help" aria-invalid={maxRows !== null && !validLimit}
+                <input aria-label="Registros por database" type="number" min={1} step={1}
+                  value={rowLimit} disabled={executing || defaultRows === null}
+                  aria-describedby="row-limit-help" aria-invalid={defaultRows !== null && !validLimit}
                   onChange={e => setRowLimit(e.target.value)} />
-                <small id="row-limit-help">{maxRows === null ? "Carregando limite…" : `De 1 a ${maxRows.toLocaleString("pt-BR")}`}</small>
+                <small id="row-limit-help">{defaultRows === null ? "Carregando padrão…" : `Padrão: ${defaultRows.toLocaleString("pt-BR")}. Informe a quantidade desejada.`}</small>
               </label>
               <div className="actions">
                 <button

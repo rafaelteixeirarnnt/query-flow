@@ -62,7 +62,7 @@ export function DynamicTable({ columns, rows }: TableData) {
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: 25 } },
+    initialState: { pagination: { pageSize: 100 } },
     columnResizeMode: "onChange",
   });
   return (
